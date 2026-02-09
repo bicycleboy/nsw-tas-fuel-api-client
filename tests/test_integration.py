@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 from dotenv import load_dotenv
-from nsw_fuel.client import (
+from nsw_tas_fuel.client import (
     NSWFuelApiClient,
     NSWFuelApiClientAuthError,
     NSWFuelApiClientError

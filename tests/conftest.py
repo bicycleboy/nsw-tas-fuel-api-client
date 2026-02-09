@@ -4,7 +4,7 @@ import pytest
 import aiohttp
 from aioresponses import aioresponses
 
-from nsw_fuel.const import AUTH_URL
+from nsw_tas_fuel.const import AUTH_URL
 
 
 @pytest.fixture

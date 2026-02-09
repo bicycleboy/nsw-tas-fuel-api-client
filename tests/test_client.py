@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aioresponses import aioresponses
-from nsw_fuel.client import (
+from nsw_tas_fuel.client import (
     NSWFuelApiClient,
     NSWFuelApiClientAuthError,
     NSWFuelApiClientConnectionError,
     NSWFuelApiClientError,
 )
-from nsw_fuel.const import (
+from nsw_tas_fuel.const import (
     AUTH_URL,
     BASE_URL,
     NEARBY_ENDPOINT,
