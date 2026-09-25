@@ -66,6 +66,12 @@ class NSWFuelApiClient:
         self._client_secret = client_secret
         self._token: str | None = None
         self._token_expiry: float = 0
+        self._http_request_counts: dict[str, int] = {
+            "oauth": 0,
+            "data": 0,
+            "retries": 0,
+        }
+        self._last_token_expires_in: int | None = None
 
 
     def _format_dt(self, dt: datetime) -> str:
@@ -109,6 +115,7 @@ class NSWFuelApiClient:
             }
 
             try:
+                self._http_request_counts["oauth"] += 1
                 async with self._session.get(
                     AUTH_URL,
                     params=params,
@@ -156,6 +163,16 @@ class NSWFuelApiClient:
                 raise NSWFuelApiClientError(msg)
 
             expires_in = int(result.get("expires_in", 3600))
+            self._last_token_expires_in = expires_in
+            _LOGGER.debug(
+                "NSW Fuel API OAuth token obtained: expires_in=%d seconds; "
+                "http_requests oauth=%d data=%d retries=%d total=%d",
+                expires_in,
+                self._http_request_counts["oauth"],
+                self._http_request_counts["data"],
+                self._http_request_counts["retries"],
+                self.http_request_count,
+            )
             self._token = access_token
             self._token_expiry = now + expires_in
 
@@ -271,6 +288,9 @@ class NSWFuelApiClient:
             url = f"{BASE_URL}{path}"
 
             try:
+                self._http_request_counts["data"] += 1
+                if attempt > 0:
+                    self._http_request_counts["retries"] += 1
                 async with self._session.request(
                     method.upper(),
                     url,
@@ -323,6 +343,21 @@ class NSWFuelApiClient:
         msg = "Failed to perform http request"
         raise NSWFuelApiClientError(msg)
 
+
+    @property
+    def http_request_counts(self) -> dict[str, int]:
+        """Return HTTP request counts for this client instance."""
+        return dict(self._http_request_counts)
+
+    @property
+    def http_request_count(self) -> int:
+        """Return total OAuth and data HTTP requests for this client instance."""
+        return self._http_request_counts["oauth"] + self._http_request_counts["data"]
+
+    @property
+    def last_token_expires_in(self) -> int | None:
+        """Return expires_in from the most recently obtained OAuth token."""
+        return self._last_token_expires_in
 
     async def get_fuel_prices(self) -> GetFuelPricesResponse:
         """

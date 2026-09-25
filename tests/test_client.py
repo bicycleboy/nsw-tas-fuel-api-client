@@ -437,3 +437,116 @@ async def test_get_fuel_prices_within_radius_missing_keys(
         or "price" in str(exc.value).lower()
         or "location" in str(exc.value).lower()
     )
+
+
+@pytest.mark.asyncio
+async def test_http_request_accounting(session, mock_token) -> None:
+    """Count OAuth and data HTTP requests separately."""
+    station_code = "1000"
+    url = f"{BASE_URL}{PRICE_ENDPOINT.format(station_code=station_code)}"
+    mock_token.get(
+        url,
+        payload={
+            "prices": [
+                {
+                    "fueltype": "U91",
+                    "price": 170.0,
+                    "lastupdated": "02/06/2018 02:03:04",
+                }
+            ]
+        },
+    )
+
+    client = NSWFuelApiClient(session=session, client_id="key", client_secret="secret")
+    await client.get_fuel_prices_for_station(station_code)
+
+    assert client.http_request_counts == {"oauth": 1, "data": 1, "retries": 0}
+    assert client.http_request_count == 2
+    assert client.last_token_expires_in == 3600
+
+
+@pytest.mark.asyncio
+async def test_cached_token_does_not_add_oauth_request(session, mock_token) -> None:
+    """A valid cached token is reused across subsequent data requests."""
+    station_code = "1000"
+    url = f"{BASE_URL}{PRICE_ENDPOINT.format(station_code=station_code)}"
+    response = {
+        "prices": [
+            {
+                "fueltype": "U91",
+                "price": 170.0,
+                "lastupdated": "02/06/2018 02:03:04",
+            }
+        ]
+    }
+    mock_token.get(url, payload=response, repeat=True)
+
+    client = NSWFuelApiClient(session=session, client_id="key", client_secret="secret")
+    await client.get_fuel_prices_for_station(station_code)
+    await client.get_fuel_prices_for_station(station_code)
+
+    assert client.http_request_counts == {"oauth": 1, "data": 2, "retries": 0}
+    assert client.http_request_count == 3
+
+
+@pytest.mark.asyncio
+async def test_408_retry_is_accounted(session, mock_token) -> None:
+    """A retried 408 counts both data attempts and one retry."""
+    station_code = "1000"
+    url = f"{BASE_URL}{PRICE_ENDPOINT.format(station_code=station_code)}"
+    mock_token.get(url, status=408, payload={"errorDetails": {"message": "Busy"}})
+    mock_token.get(
+        url,
+        payload={
+            "prices": [
+                {
+                    "fueltype": "U91",
+                    "price": 170.0,
+                    "lastupdated": "02/06/2018 02:03:04",
+                }
+            ]
+        },
+    )
+
+    client = NSWFuelApiClient(session=session, client_id="key", client_secret="secret")
+    await client.get_fuel_prices_for_station(station_code)
+
+    assert client.http_request_counts == {"oauth": 1, "data": 2, "retries": 1}
+    assert client.http_request_count == 3
+
+
+@pytest.mark.asyncio
+async def test_401_retry_refreshes_token_and_is_accounted(session) -> None:
+    """A data 401 refreshes OAuth and counts the retried data request."""
+    station_code = "1000"
+    url = f"{BASE_URL}{PRICE_ENDPOINT.format(station_code=station_code)}"
+    with aioresponses() as mocked:
+        mocked.get(
+            re.compile(re.escape(AUTH_URL)),
+            payload={"access_token": "first-token", "expires_in": 3600},
+        )
+        mocked.get(url, status=401, payload={"errorDetails": {"message": "Expired"}})
+        mocked.get(
+            re.compile(re.escape(AUTH_URL)),
+            payload={"access_token": "second-token", "expires_in": 3600},
+        )
+        mocked.get(
+            url,
+            payload={
+                "prices": [
+                    {
+                        "fueltype": "U91",
+                        "price": 170.0,
+                        "lastupdated": "02/06/2018 02:03:04",
+                    }
+                ]
+            },
+        )
+
+        client = NSWFuelApiClient(
+            session=session, client_id="key", client_secret="secret"
+        )
+        await client.get_fuel_prices_for_station(station_code)
+
+    assert client.http_request_counts == {"oauth": 2, "data": 2, "retries": 1}
+    assert client.http_request_count == 4
