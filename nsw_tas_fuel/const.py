@@ -1,6 +1,6 @@
 """Constants for NSW Fuel Check API Client."""
 
-AUTH_URL = "https://api.onegov.nsw.gov.au/oauth/client_credential/accesstoken?grant_type=client_credentials"
+AUTH_ENDPOINT = "/oauth/client_credential/accesstoken"
 BASE_URL = "https://api.onegov.nsw.gov.au"
 DEFAULT_STATE = "NSW"
 DEFAULT_TIMEOUT = 30  # seconds
