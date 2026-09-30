@@ -6,7 +6,6 @@ from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from aioresponses import aioresponses
 
 from nsw_tas_fuel.client import (
     NSWFuelApiClient,
@@ -15,8 +14,7 @@ from nsw_tas_fuel.client import (
     NSWFuelApiClientError,
 )
 from nsw_tas_fuel.const import (
-    AUTH_URL,
-    BASE_URL,
+    AUTH_ENDPOINT,
     NEARBY_ENDPOINT,
     PRICE_ENDPOINT,
     PRICES_ENDPOINT,
@@ -56,9 +54,14 @@ STATION_PRICE_CASES = [
 
 
 @pytest.fixture
-def client(session) -> NSWFuelApiClient:
+def client(session, aiointercept_mock) -> NSWFuelApiClient:
     """NSWFuelApiClient using default test credentials."""
-    return NSWFuelApiClient(session=session, client_id="key", client_secret="secret")
+    return NSWFuelApiClient(
+        session=session,
+        client_id="key",
+        client_secret="secret",
+        base_url=aiointercept_mock.server_url,
+    )
 
 
 @pytest.mark.asyncio
@@ -70,8 +73,17 @@ async def test_get_fuel_prices(
     method_name,
     endpoint,
 ) -> None:
-    """Test fetching fuel prices from both all and new endpoints."""
-    url = f"{BASE_URL}{endpoint}"
+    """
+    Test fetching fuel prices from both all and new endpoints.
+
+    When running this case and all others within HA devcontainer run
+    with:
+
+    pytest -p no:homeassistant tests/test_client.py
+
+    to avoid homeassistant blocking sockets
+    """
+    url = f"{mock_token.server_url}{endpoint}"
 
     mock_token.get(url, payload=all_prices_data)
 
@@ -106,7 +118,7 @@ async def test_get_fuel_prices_for_station(
     expected_p95_price,
 ) -> None:
     """Test fetching prices for a single station.  Test NSW and TAS."""
-    url = f"{BASE_URL}{PRICE_ENDPOINT.format(station_code=station_code)}"
+    url = f"{mock_token.server_url}{PRICE_ENDPOINT.format(station_code=station_code)}"
 
     if state is not None:
         url += f"?state={state}"
@@ -138,14 +150,18 @@ async def test_get_fuel_prices_for_station(
     assert result[0].fuel_type == "E10"
     assert result[0].price == expected_e10_price
     assert result[0].last_updated == datetime(
-        day=2, month=6, year=2018, hour=2, minute=3, second=4
-    )
+        day=2,
+        month=6,
+        year=2018,
+        hour=2,
+        minute=3,
+        second=4)
 
 
 @pytest.mark.asyncio
 async def test_get_fuel_prices_within_radius(client, mock_token) -> None:
     """Test fetching prices within radius."""
-    url = f"{BASE_URL}{NEARBY_ENDPOINT}"
+    url = f"{mock_token.server_url}{NEARBY_ENDPOINT}"
 
     mock_token.post(
         url,
@@ -222,7 +238,7 @@ async def test_get_fuel_prices_within_radius(client, mock_token) -> None:
 @pytest.mark.asyncio
 async def test_get_reference_data(client, mock_token, lovs_data) -> None:
     """Test fetching reference data."""
-    url = f"{BASE_URL}{REFERENCE_ENDPOINT}"
+    url = f"{mock_token.server_url}{REFERENCE_ENDPOINT}"
 
     mock_token.get(url, payload=lovs_data)
 
@@ -246,7 +262,7 @@ async def test_get_reference_data(client, mock_token, lovs_data) -> None:
 @pytest.mark.asyncio
 async def test_get_fuel_prices_server_error(client, mock_token) -> None:
     """Test 500 server error for all fuel prices."""
-    url = f"{BASE_URL}{PRICES_ENDPOINT}"
+    url = f"{mock_token.server_url}{PRICES_ENDPOINT}"
     mock_token.get(url, status=500, body="Internal Server Error")
 
     with pytest.raises(NSWFuelApiClientConnectionError) as exc:
@@ -259,7 +275,7 @@ async def test_get_fuel_prices_server_error(client, mock_token) -> None:
 async def test_get_fuel_prices_for_station_client_error(client, mock_token) -> None:
     """Test 400 client error for a single station."""
     station_code = "21199"
-    url = f"{BASE_URL}{PRICE_ENDPOINT.format(station_code=station_code)}"
+    url = f"{mock_token.server_url}{PRICE_ENDPOINT.format(station_code=station_code)}"
     mock_token.get(
         url,
         status=400,
@@ -282,7 +298,7 @@ async def test_get_fuel_prices_for_station_client_error(client, mock_token) -> N
 @pytest.mark.asyncio
 async def test_get_fuel_prices_within_radius_server_error(client, mock_token) -> None:
     """Test 500 server error for nearby fuel prices."""
-    url = f"{BASE_URL}{NEARBY_ENDPOINT}"
+    url = f"{mock_token.server_url}{NEARBY_ENDPOINT}"
     mock_token.post(url, status=500, body="Internal Server Error")
 
     with pytest.raises(NSWFuelApiClientError) as exc:
@@ -296,7 +312,7 @@ async def test_get_fuel_prices_within_radius_server_error(client, mock_token) ->
 @pytest.mark.asyncio
 async def test_get_reference_data_client_error(client, mock_token) -> None:
     """Test 400 client error for reference data."""
-    url = f"{BASE_URL}{REFERENCE_ENDPOINT}"
+    url = f"{mock_token.server_url}{REFERENCE_ENDPOINT}"
     mock_token.get(
         url,
         status=400,
@@ -317,7 +333,7 @@ async def test_get_reference_data_client_error(client, mock_token) -> None:
 @pytest.mark.asyncio
 async def test_get_reference_data_server_error(client, mock_token) -> None:
     """Test 500 server error for reference data."""
-    url = f"{BASE_URL}{REFERENCE_ENDPOINT}"
+    url = f"{mock_token.server_url}{REFERENCE_ENDPOINT}"
     mock_token.get(url, status=500, body="Internal Server Error.")
 
     with pytest.raises(NSWFuelApiClientConnectionError) as exc:
@@ -331,20 +347,21 @@ async def test_get_fuel_price_timeout(client, mock_token) -> None:
     """Test timeout error for fetching fuel prices for a single station."""
 
     station_code = "21199"
-    url = f"{BASE_URL}{PRICE_ENDPOINT.format(station_code=station_code)}"
-    mock_token.get(url, status=408, body="API timeout.")
+    url = f"{mock_token.server_url}{PRICE_ENDPOINT.format(station_code=station_code)}"
+    # client.py retries on 408, so the mock needs to retry
+    mock_token.get(url, status=408, body="API timeout.", repeat=2)
 
     with pytest.raises(NSWFuelApiClientError) as exc:
         await client.get_fuel_prices_for_station(station_code)
 
-    assert "Connection refused" in str(exc.value)
+    assert "Request timed out after retry" in str(exc.value)
 
 
 @pytest.mark.asyncio
 async def test_server_error_raises_connection_error(client, mock_token) -> None:
     """Test that a 500 server error raises NSWFuelApiClientConnectionError."""
 
-    url = f"{BASE_URL}{PRICES_ENDPOINT}"
+    url = f"{mock_token.server_url}{PRICES_ENDPOINT}"
     mock_token.get(
         url,
         status=500,
@@ -356,65 +373,65 @@ async def test_server_error_raises_connection_error(client, mock_token) -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_client_credentials_token_fetch(session) -> None:
+async def test_invalid_client_credentials_token_fetch(
+    session, aiointercept_mock
+) -> None:
     """
     Test that invalid client_id/client_secret causes NSWFuelApiClientAuthError
     raised during token fetch (HTTP 401 from token endpoint).
     """
+    auth_url = f"^{re.escape(aiointercept_mock.server_url)}{re.escape(AUTH_ENDPOINT)}"
+
     # Mock token URL to return 401 Unauthorized with JSON error message
-    with aioresponses() as m:
-        m.get(
-            re.compile(re.escape(AUTH_URL)),
-            status=401,
-            body=json.dumps(
-                {
-                    "error": "invalid_client",
-                    "error_description": "Invalid client credentials",
-                }
-            ),
-            content_type="application/json",
-        )
+    aiointercept_mock.get(
+        re.compile(auth_url),
+        status=401,
+        body=json.dumps(
+            {
+                "error": "invalid_client",
+                "error_description": "Invalid client credentials",
+            }
+        ),
+        content_type="application/json",
+    )
 
-        # No need to mock fuel price URL since token fetch fails
+    # No need to mock fuel price URL since token fetch fails
 
-        client = NSWFuelApiClient(
-            session=session,
-            client_id="bad_client_id",
-            client_secret="bad_client_secret",
-        )
+    client = NSWFuelApiClient(
+        session=session,
+        client_id="bad_client_id",
+        client_secret="bad_client_secret",
+        base_url=aiointercept_mock.server_url,
+    )
 
-        with pytest.raises(NSWFuelApiClientAuthError) as exc:
-            await client.get_fuel_prices()
+    with pytest.raises(NSWFuelApiClientAuthError) as exc:
+        await client.get_fuel_prices()
 
-        assert "Invalid NSW Fuel Check API credentials" in str(exc.value)
+    assert "Invalid NSW Fuel Check API credentials" in str(exc.value)
 
 
 @pytest.mark.asyncio
-async def test_async_get_token_invalid_json(client) -> None:
+async def test_async_get_token_invalid_json(client, aiointercept_mock) -> None:
     """Test handling of invalid JSON response during token fetch."""
 
     client._token = None  # force token refresh
-    url = re.compile(rf"^{re.escape(AUTH_URL)}")
+    auth_url = rf"^{re.escape(aiointercept_mock.server_url)}{re.escape(AUTH_ENDPOINT)}"
 
-    with aioresponses() as mocked:
-        # Simulate "application/json" but invalid JSON body
-        mocked.get(
-            url,
-            status=200,
-            content_type="application/json",
-            body="not valid json!!!",
-        )
+    aiointercept_mock.get(
+        re.compile(auth_url),
+        status=200,
+        content_type="application/json",
+        body="not valid json!!!",
+    )
 
-        with pytest.raises(NSWFuelApiClientError) as exc:
-            await client._async_get_token()
+    with pytest.raises(NSWFuelApiClientError) as exc:
+        await client._async_get_token()
 
-        assert "Failed to parse token response JSON" in str(exc.value)
+    assert "Failed to parse token response JSON" in str(exc.value)
 
 
 @pytest.mark.asyncio
-async def test_get_fuel_prices_for_station_empty_response(
-    client, mock_token, monkeypatch
-) -> None:
+async def test_get_fuel_prices_for_station_empty_response(client, monkeypatch) -> None:
     """Test handling of empty or malformed response for single station prices."""
 
     # Patch _async_request to return empty dict (missing "prices" key)
@@ -427,9 +444,7 @@ async def test_get_fuel_prices_for_station_empty_response(
 
 
 @pytest.mark.asyncio
-async def test_get_fuel_prices_within_radius_missing_keys(
-    client, mock_token, monkeypatch
-) -> None:
+async def test_get_fuel_prices_within_radius_missing_keys(client, monkeypatch) -> None:
     """Test handling of missing keys in response for fuel prices within radius."""
 
     # Make _async_request return "{}" so both keys "stations" and "prices" are missing
