@@ -12,8 +12,6 @@ from nsw_tas_fuel.client import (
     NSWFuelApiClientError,
 )
 
-pytestmark = pytest.mark.enable_socket
-
 
 @pytest.fixture
 async def session():
@@ -34,7 +32,6 @@ def client(session):
         client_id=os.environ["NSWFUELCHECKAPI_KEY"],
         client_secret=os.environ["NSWFUELCHECKAPI_SECRET"],
     )
-
 
 @pytest.mark.integration
 @pytest.mark.asyncio
