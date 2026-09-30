@@ -150,12 +150,8 @@ async def test_get_fuel_prices_for_station(
     assert result[0].fuel_type == "E10"
     assert result[0].price == expected_e10_price
     assert result[0].last_updated == datetime(
-        day=2,
-        month=6,
-        year=2018,
-        hour=2,
-        minute=3,
-        second=4)
+        day=2, month=6, year=2018, hour=2, minute=3, second=4
+    )
 
 
 @pytest.mark.asyncio

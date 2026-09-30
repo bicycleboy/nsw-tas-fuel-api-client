@@ -156,7 +156,7 @@ class NSWFuelApiClient:
                 _LOGGER.debug(msg)
                 raise NSWFuelApiClientError(msg) from err
 
-            except (NSWFuelApiClientAuthError, NSWFuelApiClientError):
+            except NSWFuelApiClientAuthError, NSWFuelApiClientError:
                 raise
 
             except Exception as err:
@@ -211,7 +211,7 @@ class NSWFuelApiClient:
         async def _parse_response(response: ClientResponse) -> Any:
             try:
                 return await response.json(encoding="utf-8", content_type=None)
-            except (ContentTypeError, json.JSONDecodeError):
+            except ContentTypeError, json.JSONDecodeError:
                 return await response.text()
 
         async def _handle_http_error(

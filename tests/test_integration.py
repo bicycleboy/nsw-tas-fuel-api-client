@@ -33,6 +33,7 @@ def client(session):
         client_secret=os.environ["NSWFUELCHECKAPI_SECRET"],
     )
 
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_reference_data(client):
