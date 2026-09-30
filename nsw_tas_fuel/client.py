@@ -20,7 +20,7 @@ from aiohttp import (
 )
 
 from .const import (
-    AUTH_URL,
+    AUTH_ENDPOINT,
     BASE_URL,
     DEFAULT_TIMEOUT,
     HTTP_CLIENT_SERVER_ERROR,
@@ -60,7 +60,11 @@ class NSWFuelApiClient:
     """Main API client for NSW FuelCheck."""
 
     def __init__(
-        self, session: ClientSession, client_id: str, client_secret: str
+        self,
+        session: ClientSession,
+        client_id: str,
+        client_secret: str,
+        base_url: str = BASE_URL,
     ) -> None:
         """Initialize with aiohttp session and client credentials."""
         self._session = session
@@ -69,6 +73,7 @@ class NSWFuelApiClient:
         self._token: str | None = None
         self._token_expiry: float = 0
         self._token_lock = asyncio.Lock()
+        self._base_url = base_url
 
     def _format_dt(self, dt: datetime) -> str:
         return dt.strftime("%d/%m/%Y %I:%M:%S %p")
@@ -119,7 +124,7 @@ class NSWFuelApiClient:
 
             try:
                 async with self._session.get(
-                    AUTH_URL,
+                    f"{self._base_url}{AUTH_ENDPOINT}",
                     params=params,
                     headers=headers,
                 ) as response:
@@ -151,8 +156,11 @@ class NSWFuelApiClient:
                 _LOGGER.debug(msg)
                 raise NSWFuelApiClientError(msg) from err
 
+            except (NSWFuelApiClientAuthError, NSWFuelApiClientError):
+                raise
+
             except Exception as err:
-                msg = f"Unexpected error fetching token: {err}"
+                msg = f"Error fetching token: {err}"
                 _LOGGER.debug("%s", msg)
                 raise NSWFuelApiClientError(msg) from err
 
@@ -160,7 +168,7 @@ class NSWFuelApiClient:
             access_token = result.get("access_token")
             if not access_token:
                 msg = "No access token in NSW Fuel Check token response"
-                _LOGGER.debug("Unexpected error: %s", msg)
+                _LOGGER.debug("Error: %s", msg)
                 raise NSWFuelApiClientError(msg)
 
             expires_in = int(result.get("expires_in", 3600))
@@ -203,7 +211,7 @@ class NSWFuelApiClient:
         async def _parse_response(response: ClientResponse) -> Any:
             try:
                 return await response.json(encoding="utf-8", content_type=None)
-            except ContentTypeError, json.JSONDecodeError:
+            except (ContentTypeError, json.JSONDecodeError):
                 return await response.text()
 
         async def _handle_http_error(
@@ -228,9 +236,12 @@ class NSWFuelApiClient:
 
             if status == HTTP_UNAUTHORIZED:
                 if attempt < max_retries:
-                    # Clear token to force refresh and retry
-                    self._token = None
+                    # Invalidate the token to force refresh
+                    # if it is still the one used for this request
+                    if self._token == token:
+                        self._token = None
                     return True
+
                 msg = "Authentication failed during request."
                 _LOGGER.debug("HTTP error: %s", details)
                 raise NSWFuelApiClientAuthError(details or msg)
@@ -269,7 +280,7 @@ class NSWFuelApiClient:
                 raise NSWFuelApiClientError(msg)
 
             headers = _build_headers(token)
-            url = f"{BASE_URL}{path}"
+            url = f"{self._base_url}{path}"
 
             try:
                 async with self._session.request(
@@ -358,7 +369,7 @@ class NSWFuelApiClient:
         except Exception as err:
             msg = "Unexpected error fetching fuel prices:"
             _LOGGER.debug("%s (%s) - %s", msg, type(err), err)
-            raise NSWFuelApiClientError(msg, err) from err
+            raise NSWFuelApiClientError(msg) from err
 
         if not response:
             msg = "No data returned from NSW Fuel API"
@@ -386,7 +397,7 @@ class NSWFuelApiClient:
         state: str | None = None,
     ) -> GetFuelPricesResponse:
         """
-        Fetch fuel prices from /FuelPriceCheck/v2/fuel/pricess/new
+        Fetch fuel prices from /FuelPriceCheck/v2/fuel/pricess/new.
         which returns all prices since last API call to /prices or /prices/new.
 
         """
